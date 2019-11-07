@@ -1,11 +1,10 @@
 Framework for tcp daemons handling arbitrary request->response text protocols.
 
-# Minimal example
+### Minimal example
 ```
 package main
 
 import (
-    "fmt"
     "gotcpd"
 )
 
@@ -22,12 +21,11 @@ func main() {
 } 
 ```
 
-# Example with arbitrary data passed to callback (use for init and shared data)
+### Example with arbitrary data passed to callback (use for init and shared data)
 ```
 package main
 
 import (
-    "fmt"
     "gotcpd"
 )
 
@@ -50,7 +48,7 @@ func main() {
 } 
 ```
 
-# Test
+### Test
 ```
 go test
 ```
