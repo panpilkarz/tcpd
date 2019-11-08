@@ -50,6 +50,6 @@ func main() {
 
 ### Test
 ```
-go test
+go test -v
 ```
 

@@ -17,6 +17,7 @@ const serverAddr = "127.0.0.1:7777"
 // Global variable initialized in main() and asserted in TestPassingArbitraryUserDataPtr()
 var myDataPtr string
 
+// Helper function
 func testPtr(conn net.Conn, t *testing.T) {
     fmt.Fprintf(conn, "GET ptr\n")
     message, _ := bufio.NewReader(conn).ReadString('\n')
@@ -25,12 +26,24 @@ func testPtr(conn net.Conn, t *testing.T) {
     }
 }
 
+// Helper function
 func testData(conn net.Conn, t *testing.T) {
     fmt.Fprintf(conn, "GET data\n")
     message, _ := bufio.NewReader(conn).ReadString('\n')
     if message != "my data\n" {
         t.Errorf("%#v != 'my data'\n", message)
     }
+}
+
+// Check if server responds correctly
+func TestEcho(t *testing.T) {
+    conn, _ := net.Dial("tcp", serverAddr)
+    fmt.Fprintf(conn, "GET echo\n")
+    message, _ := bufio.NewReader(conn).ReadString('\n')
+    if message != "echo\n" {
+        t.Errorf("%#v != 'echo'\n", message)
+    }
+    conn.Close()
 }
 
 // Check if arbitrary user data is correctly passed by pointer
@@ -73,20 +86,9 @@ func TestPassingArbitraryUserData(t *testing.T) {
     conn2.Close()
 }
 
-// Check if server responds correctly
-func TestEcho(t *testing.T) {
-    conn, _ := net.Dial("tcp", serverAddr)
-    fmt.Fprintf(conn, "GET echo\n")
-    message, _ := bufio.NewReader(conn).ReadString('\n')
-    if message != "echo\n" {
-        t.Errorf("%#v != 'echo'\n", message)
-    }
-    conn.Close()
-}
-
 // Test long key
 func TestLongKey(t *testing.T) {
-    // Create a string of 32MB length
+    // Create a string 32MB long
     var key string = "x"
     for i := 0; i<25; i++ {
         key = key + key
@@ -101,32 +103,37 @@ func TestLongKey(t *testing.T) {
     conn.Close()
 }
 
-// Test pipelining. Processing first messages takes longer than the second message.
+// Test multiple requests sent on one connection.
 // Responses should come in order and processing time must indicate concurrent processing.
-func TestPipelining(t *testing.T) {
+func TestResponsesOrder(t *testing.T) {
     conn, _ := net.Dial("tcp", serverAddr)
     reader := bufio.NewReader(conn)
 
     start := time.Now()
 
-    fmt.Fprintf(conn, "GET sleep 2\nGET sleep 1\n")
+    fmt.Fprintf(conn, "GET sleep 2\nGET sleep 0\nGET sleep 3\nGET sleep 1\n")
 
-    message1, _ := reader.ReadString('\n')
-    message2, _ := reader.ReadString('\n')
-
-    if message1 != "sleep 2\n" {
-        t.Errorf("%#v != 'sleep 2'\n", message1)
+    if message, _ := reader.ReadString('\n'); message != "sleep 2\n" {
+        t.Errorf("%#v != 'sleep 2'\n", message)
     }
 
-    if message2 != "sleep 1\n" {
-        t.Errorf("%#v != 'sleep 1'\n", message2)
+    if message, _ := reader.ReadString('\n'); message != "sleep 0\n" {
+        t.Errorf("%#v != 'sleep 0'\n", message)
+    }
+
+    if message, _ := reader.ReadString('\n'); message != "sleep 3\n" {
+        t.Errorf("%#v != 'sleep 3'\n", message)
+    }
+
+    if message, _ := reader.ReadString('\n'); message != "sleep 1\n" {
+        t.Errorf("%#v != 'sleep 1'\n", message)
     }
 
     end := time.Now()
     elapsed := end.Sub(start)
 
-    if elapsed.Milliseconds() > 2100 {
-        t.Errorf("Execution time %v > 2 seconds \n", elapsed)
+    if elapsed.Milliseconds() > 3100 {
+        t.Errorf("Execution time %v > 3 seconds \n", elapsed)
     }
 }
 
@@ -180,7 +187,6 @@ func TestConcurrency2(t *testing.T) {
 
     end := time.Now()
     elapsed := end.Sub(start)
-    fmt.Printf("Elapsed %v\n", elapsed);
 
     if elapsed.Milliseconds() > 1100 {
         t.Errorf("Execution time %v > 1 second \n", elapsed)
