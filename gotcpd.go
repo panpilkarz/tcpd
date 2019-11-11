@@ -58,9 +58,6 @@ func callbackWrapper(req_id int, request string, queue chan<- Response, callback
 }
 
 func handleConnection(conn net.Conn, requestDelimiter string, callback HandlerFunc, userdata interface{}) {
-    var req_id = 0
-    var queue = make(chan Response)
-
     var err error = nil
     var request string
     var s string
@@ -69,11 +66,15 @@ func handleConnection(conn net.Conn, requestDelimiter string, callback HandlerFu
     reader := bufio.NewReader(conn)
     writer := bufio.NewWriter(conn)
 
+    var req_id = 0
+    var queue = make(chan Response)
+
     go responder(writer, queue);
 
     //log.Printf("[%v] Got new connection\n", conn)
 
     defer conn.Close()
+    defer close(queue)
 
     for {
         s, err = reader.ReadString(delimiter)
