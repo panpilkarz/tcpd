@@ -46,6 +46,15 @@ func TestEcho(t *testing.T) {
     conn.Close()
 }
 
+// Check if server handles the case if client quits without waiting for responses
+func TestPrematureQuit(t *testing.T) {
+    conn, _ := net.Dial("tcp", serverAddr)
+    fmt.Fprintf(conn, "GET sleep 1\n")
+    conn.Close()
+    time.Sleep(2 * time.Second)
+    // panic: (send on closed channel)
+}
+
 // Check if arbitrary user data is correctly passed by pointer
 func TestPassingArbitraryUserDataPtr(t *testing.T) {
     // Multiple requests on single connection
@@ -102,6 +111,29 @@ func TestLongKey(t *testing.T) {
     }
     conn.Close()
 }
+
+// Check 2x10000 request-respone pairs
+func TestManyRequests(t *testing.T) {
+    conn1, _ := net.Dial("tcp", serverAddr)
+    conn2, _ := net.Dial("tcp", serverAddr)
+    for i := 0; i<100000; i++ {
+        fmt.Fprintf(conn1, "GET %d\n", i)
+        fmt.Fprintf(conn2, "GET %d\n", i)
+
+        message1, err1 := bufio.NewReader(conn1).ReadString('\n')
+        if err1 != nil || message1 != fmt.Sprintf("%d\n", i) {
+            t.Errorf("Error while receiving message %d\n", i)
+        }
+
+        message2, err2 := bufio.NewReader(conn2).ReadString('\n')
+        if err2 != nil || message2 != fmt.Sprintf("%d\n", i) {
+            t.Errorf("Error while receiving message %d\n", i)
+        }
+    }
+    conn1.Close()
+    conn2.Close()
+}
+
 
 // Test multiple requests sent on one connection.
 // Responses should come in order and processing time must indicate concurrent processing.

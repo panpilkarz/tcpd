@@ -3,6 +3,7 @@ package gotcpd
 import (
     "net"
     "log"
+    "sync"
     "bufio"
     "strings"
 )
@@ -45,22 +46,25 @@ func responder(writer *bufio.Writer, queue <-chan Response) {
         }
     }
 
-    log.Printf("Responder has finished\n")
+    //log.Printf("Responder has finished\n")
 }
 
-
-func callbackWrapper(req_id int, request string, queue chan<- Response, callback HandlerFunc, userdata interface{}) {
+func callbackWrapper(request string, queue chan<- Response, callback HandlerFunc, userdata interface{}, req_id int, closed *int, lock *sync.RWMutex) {
     // Execute user-defined function
     value := callback(request, userdata)
+
+    lock.RLock()
+    if *closed == 1 {
+        lock.RUnlock()
+        return
+    }
+    lock.RUnlock()
 
     // Send the response to the responder
     queue <- Response{req_id, value}
 }
 
 func handleConnection(conn net.Conn, requestDelimiter string, callback HandlerFunc, userdata interface{}) {
-    var req_id = 0
-    var queue = make(chan Response)
-
     var err error = nil
     var request string
     var s string
@@ -68,6 +72,11 @@ func handleConnection(conn net.Conn, requestDelimiter string, callback HandlerFu
 
     reader := bufio.NewReader(conn)
     writer := bufio.NewWriter(conn)
+
+    var req_id = 0
+    var closed = 0
+    var lock sync.RWMutex
+    var queue = make(chan Response)
 
     go responder(writer, queue);
 
@@ -79,19 +88,23 @@ func handleConnection(conn net.Conn, requestDelimiter string, callback HandlerFu
         s, err = reader.ReadString(delimiter)
 
         if err != nil {
-            //log.Println("client left...")
+            //log.Printf("Client left... %v\n", err)
             break
         }
 
         request += s
 
         if strings.HasSuffix(request, requestDelimiter) {
-            //log.Printf("[%v] Got new request: %#v\n", req_id, request)
-            go callbackWrapper(req_id, request, queue, callback, userdata)
+            //log.Printf("[%v] Request: %#v\n", req_id, request)
+            go callbackWrapper(request, queue, callback, userdata, req_id, &closed, &lock)
             req_id += 1
             request = ""
         }
     }
+    lock.Lock()
+    closed = 1
+    lock.Unlock()
+    defer close(queue)
 }
 
 func RunServer(addr string, requestDelimiter string, callback HandlerFunc, userdata interface{}) {
