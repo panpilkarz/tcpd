@@ -54,14 +54,12 @@ func callbackWrapper(request string, queue chan<- Response, callback HandlerFunc
     value := callback(request, userdata)
 
     lock.RLock()
-    if *closed == 1 {
-        lock.RUnlock()
-        return
+    if *closed == 0 {
+        // Send the response to the responder
+        queue <- Response{req_id, value}
     }
     lock.RUnlock()
 
-    // Send the response to the responder
-    queue <- Response{req_id, value}
 }
 
 func handleConnection(conn net.Conn, requestDelimiter string, callback HandlerFunc, userdata interface{}) {
