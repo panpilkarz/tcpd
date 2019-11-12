@@ -83,6 +83,7 @@ func handleConnection(conn net.Conn, requestDelimiter string, callback HandlerFu
     //log.Printf("[%v] Got new connection\n", conn)
 
     defer conn.Close()
+    defer close(queue)
 
     for {
         s, err = reader.ReadString(delimiter)
