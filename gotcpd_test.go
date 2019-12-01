@@ -55,6 +55,14 @@ func TestPrematureQuit(t *testing.T) {
     // panic: (send on closed channel)
 }
 
+// Check if server handles the case if client quits without sending any request
+func TestQuitWithoutRequest(t *testing.T) {
+    conn, _ := net.Dial("tcp", serverAddr)
+    conn.Close()
+    time.Sleep(1 * time.Second)
+    // panic: (send on closed channel)
+}
+
 // Check if arbitrary user data is correctly passed by pointer
 func TestPassingArbitraryUserDataPtr(t *testing.T) {
     // Multiple requests on single connection
