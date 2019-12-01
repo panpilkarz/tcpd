@@ -3,7 +3,6 @@ package gotcpd
 import (
     "net"
     "log"
-    "sync"
     "bufio"
     "strings"
 )
@@ -14,95 +13,111 @@ import (
 type HandlerFunc func(request string, userdata interface{}) string
 
 type Response struct {
-    req_id int
+    reqNum int
     value string
+    finished bool
 }
 
 // Waits for responses from the connection requests workers
-func responder(writer *bufio.Writer, queue <-chan Response) {
-    var waiting_for_req_id = 0
+// Receive responses via @queue channel
+// Send to @finished channel that all responses are flushed
+func responder(writer *bufio.Writer, queue <-chan Response, finished chan<- bool) {
+    var waitingForReqNum = 0
+    var finishedAtReqNum = -1
 
     // Store responses in the map.
-    // @key: req_id
-    // @value: response text
+    // @key: reqNum
+    // @value: response plain text
     responses := make(map[int]string)
 
     //log.Printf("Start responder\n")
-    for response := range queue {
-        responses[response.req_id] = response.value
+    for msg := range queue {
+        responses[msg.reqNum] = msg.value
+
+        if finishedAtReqNum == -1 && msg.finished {
+            finishedAtReqNum = msg.reqNum
+        }
 
         // Try to flush responses queue
         for {
-            value, ok := responses[waiting_for_req_id]
-            if ok {
-                writer.WriteString(value)
-                writer.Flush()
-                //log.Printf("[%d] Response: %#v\n", waiting_for_req_id, value)
-                delete(responses, waiting_for_req_id)
-                waiting_for_req_id += 1
+            if value, ok := responses[waitingForReqNum]; ok {
+                // Dont write to client which has finished
+                if finishedAtReqNum == -1 {
+                    writer.WriteString(value)
+                    writer.Flush()
+                }
+                //log.Printf("[%d] Response: %#v\n", waitingForReqNum, value)
+                delete(responses, waitingForReqNum)
+                waitingForReqNum += 1
                 continue
             }
             break
+        }
+
+        if finishedAtReqNum >= 0 && waitingForReqNum > finishedAtReqNum {
+            finished <- true
         }
     }
 
     //log.Printf("Responder has finished\n")
 }
 
-func callbackWrapper(request string, queue chan<- Response, callback HandlerFunc, userdata interface{}, req_id int, closed *int, lock *sync.RWMutex) {
+func cb(request string, queue chan<- Response, callback HandlerFunc, userdata interface{}, reqNum int, finished bool) {
+
+    if finished {
+        // Communicate to the responder that client has finished
+        queue <- Response{reqNum, "", true}
+        return
+    }
+
     // Execute user-defined function
     value := callback(request, userdata)
 
-    lock.RLock()
-    if *closed == 0 {
-        // Send the response to the responder
-        queue <- Response{req_id, value}
-    }
-    lock.RUnlock()
-
+    // Send the response to the responder
+    queue <- Response{reqNum, value, false}
 }
 
 func handleConnection(conn net.Conn, requestDelimiter string, callback HandlerFunc, userdata interface{}) {
-    var err error = nil
+    //log.Printf("[%v] Got new connection\n", conn)
+
     var request string
-    var s string
     var delimiter byte = byte(requestDelimiter[len(requestDelimiter)-1])
+
+    var reqNum = 0
+    var queue = make(chan Response)
+    var finished = make(chan bool)
 
     reader := bufio.NewReader(conn)
     writer := bufio.NewWriter(conn)
 
-    var req_id = 0
-    var closed = 0
-    var lock sync.RWMutex
-    var queue = make(chan Response)
-
-    go responder(writer, queue);
-
-    //log.Printf("[%v] Got new connection\n", conn)
-
     defer conn.Close()
+    defer close(queue)
+    defer close(finished)
+
+    // Start responder goroutine that writes to the client
+    go responder(writer, queue, finished);
 
     for {
-        s, err = reader.ReadString(delimiter)
+        s, err := reader.ReadString(delimiter)
 
         if err != nil {
             //log.Printf("Client left... %v\n", err)
+            go cb("", queue, callback, userdata, reqNum, true)
             break
         }
 
         request += s
 
         if strings.HasSuffix(request, requestDelimiter) {
-            //log.Printf("[%v] Request: %#v\n", req_id, request)
-            go callbackWrapper(request, queue, callback, userdata, req_id, &closed, &lock)
-            req_id += 1
+            //log.Printf("[%v] Request: %#v\n", reqNum, request)
+            go cb(request, queue, callback, userdata, reqNum, false)
+            reqNum += 1
             request = ""
         }
     }
-    lock.Lock()
-    closed = 1
-    lock.Unlock()
-    close(queue)
+
+    // Wait for responder goroutine to finish
+    <- finished
 }
 
 func RunServer(addr string, requestDelimiter string, callback HandlerFunc, userdata interface{}) {
