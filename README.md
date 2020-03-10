@@ -48,6 +48,15 @@ func main() {
 } 
 ```
 
+### Requests without delimiters
+
+It is possible send requests that have no common delimiter. 
+To do that set delimiter to `""` and send `[n][text]` message where `n` is little endian int32 containing the lenght of following @text part.
+
+```
+gotcpd.RunServer("127.0.0.1:7777", "", callback, nil)
+```
+
 ### Test
 ```
 go test -v

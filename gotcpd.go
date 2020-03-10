@@ -5,6 +5,7 @@ import (
     "log"
     "bufio"
     "strings"
+    "encoding/binary"
 )
 
 // Function provided by the user.
@@ -81,7 +82,13 @@ func handleConnection(conn net.Conn, requestDelimiter string, callback HandlerFu
     //log.Printf("[%v] Got new connection\n", conn)
 
     var request string
-    var delimiter byte = byte(requestDelimiter[len(requestDelimiter)-1])
+
+    var delimiter byte = 0
+    var textSize int32 = 0
+
+    if requestDelimiter != "" {
+        delimiter = byte(requestDelimiter[len(requestDelimiter)-1])
+    }
 
     var reqNum = 0
     var queue = make(chan Response)
@@ -98,21 +105,57 @@ func handleConnection(conn net.Conn, requestDelimiter string, callback HandlerFu
     go responder(writer, queue, finished);
 
     for {
-        s, err := reader.ReadString(delimiter)
+        // Handle '[n][text]' protocol where @n is binary int32 @text size
+        if delimiter == 0 {
 
-        if err != nil {
-            //log.Printf("Client left... %v\n", err)
-            go cb("", queue, callback, userdata, reqNum, true)
-            break
-        }
+            if textSize == 0 {
+                // Read [n] part of the protcol
+                err := binary.Read(reader, binary.LittleEndian, &textSize)
+                if err != nil {
+                    //log.Printf("Client left... %v\n", err)
+                    go cb("", queue, callback, userdata, reqNum, true)
+                    break
+                }
+            }
 
-        request += s
+            buf := make([]byte, 32768)
+            n, err := reader.Read(buf)
 
-        if strings.HasSuffix(request, requestDelimiter) {
-            //log.Printf("[%v] Request: %#v\n", reqNum, request)
-            go cb(request, queue, callback, userdata, reqNum, false)
-            reqNum += 1
-            request = ""
+            if err != nil {
+                //log.Printf("Client left... %v\n", err)
+                go cb("", queue, callback, userdata, reqNum, true)
+                break
+            }
+
+            request += string(buf[0:n])
+
+            // Read of [text] part of protocol is complete
+            if int32(len(request)) == textSize {
+                go cb(request, queue, callback, userdata, reqNum, false)
+                textSize = 0
+                reqNum += 1
+                request = ""
+            }
+
+        } else {
+            // Handle delimiter based text protocol
+
+            s, err := reader.ReadString(delimiter)
+
+            if err != nil {
+                //log.Printf("Client left... %v\n", err)
+                go cb("", queue, callback, userdata, reqNum, true)
+                break
+            }
+
+            request += s
+
+            if strings.HasSuffix(request, requestDelimiter) {
+                //log.Printf("[%v] Request: %#v\n", reqNum, request)
+                go cb(request, queue, callback, userdata, reqNum, false)
+                reqNum += 1
+                request = ""
+            }
         }
     }
 
