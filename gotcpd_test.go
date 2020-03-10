@@ -10,6 +10,7 @@ import (
     "strings"
     "strconv"
     "testing"
+    "encoding/binary"
 )
 
 const serverAddr = "127.0.0.1:7777"
@@ -244,6 +245,50 @@ func TestLongDelimiter(t *testing.T) {
     conn.Close()
 }
 
+// Test binary-text protocol
+func TestBinaryTextProtocol(t *testing.T) {
+    // Send 10-bytes long request
+    var size int32 = 10;
+
+    conn, _ := net.Dial("tcp", "127.0.0.1:7779")
+    err := binary.Write(conn, binary.LittleEndian, size)
+    if err != nil {
+        fmt.Println("err:", err)
+    }
+
+    fmt.Fprintf(conn, "abcde12345")
+
+    message, _ := bufio.NewReader(conn).ReadString('\n')
+    if message != "Received `abcde12345` from you\n" {
+        t.Errorf("%#v != 'Received `abcde12345` from you\n", message)
+    }
+
+    conn.Close()
+}
+
+// Test binary-text protocol
+func TestBinaryTextProtocolVeryLongKey(t *testing.T) {
+    // Create a string 32MB long
+    var key string = "x"
+    for i := 0; i<25; i++ {
+        key = key + key
+    }
+
+    var size int32 = int32(len(key))
+    conn, _ := net.Dial("tcp", "127.0.0.1:7779")
+    err := binary.Write(conn, binary.LittleEndian, size)
+    if err != nil {
+        fmt.Println("err:", err)
+    }
+
+    fmt.Fprintf(conn, key)
+
+    message, _ := bufio.NewReader(conn).ReadString('\n')
+    if len(message) != len(key) + len("Received `` from you\n") {
+        t.Errorf("Length of key %d != %d\n", len(key), len(key) + len("Received `` from you\n"))
+    }
+}
+
 type UserData struct {
     mydata string
 }
@@ -275,15 +320,22 @@ func worker2(request string, userdata interface{}) string {
     return fmt.Sprintf("My proto is CFCF.CFCF\n")
 }
 
+func worker3(request string, userdata interface{}) string {
+    return fmt.Sprintf("Received `%v` from you\n", request)
+}
+
 func TestMain(m *testing.M) {
 
-    // Run main server
+    // Run main test server
     userdata := UserData{"my data"}
     myDataPtr = fmt.Sprintf("%p\n", &userdata.mydata)
     go RunServer(serverAddr, "\n", worker, &userdata)
 
-    // Run second server
+    // Run second test server
     go RunServer("127.0.0.1:7778", "\r\r.\r\r", worker2, nil)
+
+    // Run third test server with binary-text protocol
+    go RunServer("127.0.0.1:7779", "", worker3, nil)
 
     // Wait a bit to have tcp accepting loops ready
     time.Sleep(100 * time.Millisecond)
